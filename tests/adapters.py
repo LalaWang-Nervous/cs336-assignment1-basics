@@ -10,6 +10,11 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 
+# for run_train_bpe
+from cs336_basics.train_bpe.multithread_splitter import MultiThreadSplitter
+from cs336_basics.train_bpe.bpe import MultiThreadBPETrainer
+
+
 def run_linear(
     d_in: int,
     d_out: int,
@@ -573,20 +578,60 @@ def run_train_bpe(
 
     Args:
         input_path (str | os.PathLike): Path to BPE tokenizer training data.
+        原始的文本训练预料的路径
+
         vocab_size (int): Total number of items in the tokenizer's vocabulary (including special tokens).
+        词表大小，可以认为是一个超参数，
+        最终merge操作的次数等于 vocab_size - initial_vocab_size(256) - len(special_tokens)
+
         special_tokens (list[str]): A list of string special tokens to be added to the tokenizer vocabulary.
             These strings will never be split into multiple tokens, and will always be
             kept as a single token. If these special tokens occur in the `input_path`,
             they are treated as any other string.
+        特殊字符列表，由实际应用场景决定
 
     Returns:
         tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
             vocab:
                 The trained tokenizer vocabulary, a mapping from int (token ID in the vocabulary)
                 to bytes (token bytes)
+
+                大小就是 vocab_size，每一个ID到对应实际token的映射关系，此时这个token已经是byte类型了，但是能被decode成字符串
             merges:
                 BPE merges. Each list item is a tuple of bytes (<token1>, <token2>),
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
+                BPE merge操作的列表，每一个元素是一个二元组，表示两个token被merge成一个新的token
+                形如['s t', 'e st', 'o w', 'l ow', 'w est', 'n e'], 其实就是每一次merge操作的行为记录累计
     """
-    raise NotImplementedError
+
+    """
+    分为若干步骤：
+    1. 首先根据special_tokens，将总文本根据special_tokens拆分若干段落
+    2. 对每一段落进行BPE训练，得到vocab和merges
+    3. 将所有段落的vocab和merges进行合并，得到最终的vocab和merges，并返回
+
+    在这个过程中要充分使用分治的思想
+
+    进一步拆解
+    1. ...
+       a. 读取机器的核数N，将总的文本拆成N份，这个过程需要注意，在拆分N份的时候，会不会恰好分割了special_token
+       b. 对于每一份文本，都要单独根据special_tokens进行拆分，得到若干子段落
+
+    2. ...
+       a. 这个时候，N份文本都被拆分成了若干字段落，数量分别是 M_1, M_2, ..., M_N
+       b. 将这M_1 + M_2 + ... + M_N个段落，分配到N个线程中去
+       c. 每一个进程对分配到的段落，基于最新的vocab进行BPE统计，得到局部频率统计结果
+           - 根据预先规定好的正则，先pre_tiokenize一下，切成词
+           - 统计词的频率统计
+           - 对每一个词进行BPE拆分，得到每个词的BPE表示统计频率结果，局部频率统计及过就是词的统计乘以词的数量
+       d. 合并所有进程的局部频率统计结果，得到全局的频率统计结果，获得本轮merge操作，更新vocab和merges
+       e. 重复c、d，直到达到预定的vocab_size
+
+    3. ...
+       注意，在d步骤做完之后，并不需要重新遍历一遍，只需要对频率统计做一个更新即可，这里维护一个最大堆即可
+    """
+
+    with open(input_path, "rb") as f:
+        boundaries = MultiThreadSplitter.split(f, special_tokens)
+        return MultiThreadBPETrainer.train(f, vocab_size, special_tokens, boundaries)
