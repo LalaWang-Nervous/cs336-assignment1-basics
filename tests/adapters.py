@@ -14,6 +14,9 @@ from torch import Tensor
 from cs336_basics.train_bpe.multithread_splitter import MultiThreadSplitter
 from cs336_basics.train_bpe.bpe import MultiThreadBPETrainer
 
+# for test toknizer
+from cs336_basics.tokenizer import TokenizerImpl
+
 
 def run_linear(
     d_in: int,
@@ -564,7 +567,7 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+    return TokenizerImpl(vocab, merges, special_tokens)
 
 
 def run_train_bpe(
@@ -633,5 +636,5 @@ def run_train_bpe(
     """
 
     with open(input_path, "rb") as f:
-        boundaries = MultiThreadSplitter.split(f, special_tokens)
+        boundaries, _ = MultiThreadSplitter.split_file(f, special_tokens)
         return MultiThreadBPETrainer.train(f, vocab_size, special_tokens, boundaries)
